@@ -198,6 +198,8 @@ enum nd_pfn_mode {
 	PFN_MODE_NONE,
 	PFN_MODE_RAM,
 	PFN_MODE_PMEM,
+	PFN3_MODE_RAM,
+	PFN3_MODE_PMEM,
 };
 
 struct nd_pfn {

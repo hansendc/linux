@@ -210,6 +210,36 @@ static ssize_t namespace_store(struct device *dev,
 }
 static DEVICE_ATTR_RW(namespace);
 
+static u32 pfn_start_pad(struct nd_pfn *nd_pfn)
+{
+	struct nd_pfn_sb *pfn_sb = nd_pfn->pfn_sb;
+
+	/* starting v1.3 start_pad is accounted in dataoff */
+	if (__le16_to_cpu(pfn_sb->version_minor) < 3)
+		return __le32_to_cpu(pfn_sb->start_pad);
+	return 0;
+}
+
+/*
+ * Where does data start relative to the start of the namespace resource
+ * base?
+ */
+static u64 pfn_dataoff(struct nd_pfn *nd_pfn)
+{
+	return __le64_to_cpu(nd_pfn->pfn_sb->dataoff);
+}
+
+/*
+ * How much of the namespace resource capacity is taking up by padding,
+ * outside of what is accounted in the data_offset?
+ */
+static u32 pfn_pad(struct nd_pfn *nd_pfn)
+{
+	struct nd_pfn_sb *pfn_sb = nd_pfn->pfn_sb;
+
+	return pfn_start_pad(nd_pfn) + __le32_to_cpu(pfn_sb->end_trunc);
+}
+
 static ssize_t resource_show(struct device *dev,
 		struct device_attribute *attr, char *buf)
 {
@@ -218,14 +248,11 @@ static ssize_t resource_show(struct device *dev,
 
 	device_lock(dev);
 	if (dev->driver) {
-		struct nd_pfn_sb *pfn_sb = nd_pfn->pfn_sb;
-		u64 offset = __le64_to_cpu(pfn_sb->dataoff);
 		struct nd_namespace_common *ndns = nd_pfn->ndns;
-		u32 start_pad = __le32_to_cpu(pfn_sb->start_pad);
 		struct nd_namespace_io *nsio = to_nd_namespace_io(&ndns->dev);
 
 		rc = sprintf(buf, "%#llx\n", (unsigned long long) nsio->res.start
-				+ start_pad + offset);
+				+ pfn_dataoff(nd_pfn) + pfn_start_pad(nd_pfn));
 	} else {
 		/* no address to convey if the pfn instance is disabled */
 		rc = -ENXIO;
@@ -244,16 +271,12 @@ static ssize_t size_show(struct device *dev,
 
 	device_lock(dev);
 	if (dev->driver) {
-		struct nd_pfn_sb *pfn_sb = nd_pfn->pfn_sb;
-		u64 offset = __le64_to_cpu(pfn_sb->dataoff);
 		struct nd_namespace_common *ndns = nd_pfn->ndns;
-		u32 start_pad = __le32_to_cpu(pfn_sb->start_pad);
-		u32 end_trunc = __le32_to_cpu(pfn_sb->end_trunc);
 		struct nd_namespace_io *nsio = to_nd_namespace_io(&ndns->dev);
 
 		rc = sprintf(buf, "%llu\n", (unsigned long long)
-				resource_size(&nsio->res) - start_pad
-				- end_trunc - offset);
+				resource_size(&nsio->res) - pfn_dataoff(nd_pfn)
+				- pfn_pad(nd_pfn));
 	} else {
 		/* no size to convey if the pfn instance is disabled */
 		rc = -ENXIO;
@@ -422,10 +445,10 @@ static int nd_pfn_clear_memmap_errors(struct nd_pfn *nd_pfn)
 
 int nd_pfn_validate(struct nd_pfn *nd_pfn, const char *sig)
 {
+	unsigned long align;
 	u64 checksum, offset;
 	enum nd_pfn_mode mode;
 	struct nd_namespace_io *nsio;
-	unsigned long align, start_pad;
 	struct nd_pfn_sb *pfn_sb = nd_pfn->pfn_sb;
 	struct nd_namespace_common *ndns = nd_pfn->ndns;
 	const u8 *parent_uuid = nd_dev_to_uuid(&ndns->dev);
@@ -465,9 +488,20 @@ int nd_pfn_validate(struct nd_pfn *nd_pfn, const char *sig)
 	if (__le16_to_cpu(pfn_sb->min_version) > PFN_VERSION_SUPPORT)
 		return -EINVAL;
 
-	switch (le32_to_cpu(pfn_sb->mode)) {
+	mode = le32_to_cpu(pfn_sb->mode);
+	/*
+	 * PFN3_MODEs are used to make older Linux implementations fail
+	 * to parse the info-block.
+	 */
+	switch (mode) {
 	case PFN_MODE_RAM:
 	case PFN_MODE_PMEM:
+		break;
+	case PFN3_MODE_RAM:
+		mode = PFN_MODE_RAM;
+		break;
+	case PFN3_MODE_PMEM:
+		mode = PFN_MODE_PMEM;
 		break;
 	default:
 		return -ENXIO;
@@ -475,10 +509,8 @@ int nd_pfn_validate(struct nd_pfn *nd_pfn, const char *sig)
 
 	align = le32_to_cpu(pfn_sb->align);
 	offset = le64_to_cpu(pfn_sb->dataoff);
-	start_pad = le32_to_cpu(pfn_sb->start_pad);
 	if (align == 0)
 		align = 1UL << ilog2(offset);
-	mode = le32_to_cpu(pfn_sb->mode);
 
 	if (!nd_pfn->uuid) {
 		/*
@@ -534,7 +566,8 @@ int nd_pfn_validate(struct nd_pfn *nd_pfn, const char *sig)
 		return -EBUSY;
 	}
 
-	if ((align && !IS_ALIGNED(nsio->res.start + offset + start_pad, align))
+	if ((align && !IS_ALIGNED(nsio->res.start + offset
+					+ pfn_start_pad(nd_pfn), align))
 			|| !IS_ALIGNED(offset, PAGE_SIZE)) {
 		dev_err(&nd_pfn->dev,
 				"bad offset: %#llx dax disabled align: %#lx\n",
@@ -586,31 +619,23 @@ int nd_pfn_probe(struct device *dev, struct nd_namespace_common *ndns)
 }
 EXPORT_SYMBOL(nd_pfn_probe);
 
-static u32 info_block_reserve(void)
+static u32 info_block_reserve(u32 start_pad)
 {
-	return ALIGN(SZ_8K, PAGE_SIZE);
+	u32 reserve = ALIGN(SZ_8K, PAGE_SIZE);
+
+	/*
+	 * Does the start_pad subsume the info-block at the start of the
+	 * raw resource base?
+	 */
+	if (start_pad <= reserve)
+		return reserve - start_pad;
+	return 0;
 }
 
 /*
  * We hotplug memory at section granularity, pad the reserved area from
  * the previous section base to the namespace base address.
  */
-static unsigned long init_altmap_base(resource_size_t base)
-{
-	unsigned long base_pfn = PHYS_PFN(base);
-
-	return PFN_SECTION_ALIGN_DOWN(base_pfn);
-}
-
-static unsigned long init_altmap_reserve(resource_size_t base)
-{
-	unsigned long reserve = info_block_reserve() >> PAGE_SHIFT;
-	unsigned long base_pfn = PHYS_PFN(base);
-
-	reserve += base_pfn - PFN_SECTION_ALIGN_DOWN(base_pfn);
-	return reserve;
-}
-
 static int __nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap,
 		struct pfn_map_info *mi)
 {
@@ -618,31 +643,39 @@ static int __nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap,
 	struct vmem_altmap *altmap = &pgmap->altmap;
 	struct nd_pfn_sb *pfn_sb = nd_pfn->pfn_sb;
 	u64 offset = le64_to_cpu(pfn_sb->dataoff);
-	u32 start_pad = __le32_to_cpu(pfn_sb->start_pad);
+	u32 start_pad = __le32_to_cpu(pfn_sb->start_pad), map_start_pad;
 	u32 end_trunc = __le32_to_cpu(pfn_sb->end_trunc);
-	u32 reserve = info_block_reserve();
+	u32 reserve = info_block_reserve(start_pad);
 	struct nd_namespace_common *ndns = nd_pfn->ndns;
 	struct nd_namespace_io *nsio = to_nd_namespace_io(&ndns->dev);
 	resource_size_t base = nsio->res.start + start_pad;
+	struct device *dev = &nd_pfn->dev;
 	struct vmem_altmap __altmap = {
-		.base_pfn = init_altmap_base(base),
-		.reserve = init_altmap_reserve(base),
+		.base_pfn = PHYS_PFN(base),
+		.reserve = PHYS_PFN(reserve),
 	};
 
 	memcpy(res, &nsio->res, sizeof(*res));
 	res->start += start_pad;
 	res->end -= end_trunc;
 
+	/*
+	 * map_start_pad is adjusted to 0 for pre-v1.3 infoblocks to
+	 * preserve a bug in the implementation that can only be fixed
+	 * by migrating to a v1.3+ configuration.
+	 *
+	 * Post v1.3 start_pad is accounted in ->data_offset, and
+	 * ensures that:
+	 *     __va(map_base) == __pa(map)
+	 *
+	 * map_pad is only non-zero when ensuring backwards
+	 * compatibility with pre-v1.3 configurations.
+	 */
+	map_start_pad = start_pad - pfn_start_pad(nd_pfn);
 	*mi = (struct pfn_map_info) {
-		/*
-		 * TODO fix implementation to properly account for
-		 * 'start_pad' in map_base, and map_offset. As is, the
-		 * fact that __va(map_base) != __pa(map) leads
-		 * mistranslations in pmem_direct_access().
-		 */
-		.map_base = nsio->res.start,
-		.map_pad = start_pad,
-		.map_offset = offset,
+		.map_base = nsio->res.start + map_start_pad,
+		.map_pad = pfn_start_pad(nd_pfn),
+		.map_offset = offset - map_start_pad,
 		.map_size = resource_size(res),
 	};
 
@@ -653,14 +686,14 @@ static int __nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap,
 		pgmap->altmap_valid = false;
 	} else if (nd_pfn->mode == PFN_MODE_PMEM) {
 		nd_pfn->npfns = PFN_SECTION_ALIGN_UP((resource_size(res)
+					- pfn_start_pad(nd_pfn)
 					- offset) / PAGE_SIZE);
 		if (le64_to_cpu(nd_pfn->pfn_sb->npfns) > nd_pfn->npfns)
-			dev_info(&nd_pfn->dev,
-					"number of pfns truncated from %lld to %ld\n",
+			dev_info(dev, "number of pfns truncated from %lld to %ld\n",
 					le64_to_cpu(nd_pfn->pfn_sb->npfns),
 					nd_pfn->npfns);
 		memcpy(altmap, &__altmap, sizeof(*altmap));
-		altmap->free = PHYS_PFN(offset - reserve);
+		altmap->free = PHYS_PFN(mi->map_offset - reserve);
 		altmap->alloc = 0;
 		pgmap->altmap_valid = true;
 	} else
@@ -712,7 +745,7 @@ static int nd_pfn_init(struct nd_pfn *nd_pfn)
 {
 	struct nd_namespace_common *ndns = nd_pfn->ndns;
 	struct nd_namespace_io *nsio = to_nd_namespace_io(&ndns->dev);
-	u32 start_pad, end_trunc, reserve = info_block_reserve();
+	u32 start_pad, end_trunc, reserve;
 	resource_size_t start, size;
 	struct nd_region *nd_region;
 	struct nd_pfn_sb *pfn_sb;
@@ -750,6 +783,7 @@ static int nd_pfn_init(struct nd_pfn *nd_pfn)
 	if (start_pad + end_trunc)
 		dev_info(&nd_pfn->dev, "%s alignment collision, truncate %d bytes\n",
 				dev_name(&ndns->dev), start_pad + end_trunc);
+	reserve = info_block_reserve(start_pad);
 
 	/*
 	 * Note, we use 64 here for the standard size of struct page,
@@ -769,29 +803,44 @@ static int nd_pfn_init(struct nd_pfn *nd_pfn)
 		 */
 		offset = ALIGN(start + reserve + 64 * npfns,
 				max(nd_pfn->align, PMD_SIZE)) - start;
-	} else if (nd_pfn->mode == PFN_MODE_RAM)
+		offset += start_pad;
+	} else if (nd_pfn->mode == PFN_MODE_RAM) {
 		offset = ALIGN(start + reserve, nd_pfn->align) - start;
-	else
+		offset += start_pad;
+	} else
 		return -ENXIO;
 
-	if (offset + start_pad + end_trunc >= size) {
+	if (offset + end_trunc >= size) {
 		dev_err(&nd_pfn->dev, "%s unable to satisfy requested alignment\n",
 				dev_name(&ndns->dev));
 		return -ENXIO;
 	}
 
-	npfns = (size - offset - start_pad - end_trunc) / SZ_4K;
-	pfn_sb->mode = cpu_to_le32(nd_pfn->mode);
+
+	npfns = (size - offset - end_trunc) / SZ_4K;
+
 	pfn_sb->dataoff = cpu_to_le64(offset);
 	pfn_sb->npfns = cpu_to_le64(npfns);
 	memcpy(pfn_sb->signature, sig, PFN_SIG_LEN);
 	memcpy(pfn_sb->uuid, nd_pfn->uuid, 16);
 	memcpy(pfn_sb->parent_uuid, nd_dev_to_uuid(&ndns->dev), 16);
 	pfn_sb->version_major = cpu_to_le16(1);
-	pfn_sb->version_minor = cpu_to_le16(2);
-	pfn_sb->min_version = cpu_to_le16(2);
 	pfn_sb->start_pad = cpu_to_le32(start_pad);
 	pfn_sb->end_trunc = cpu_to_le32(end_trunc);
+	if (start_pad) {
+		/*
+		 * Require implementations to account for start_pad in
+		 * data_offset. Use PFN3_MODE to cause versions older
+		 * than the introduction of min_version to fail.
+		 */
+		pfn_sb->mode = cpu_to_le32(nd_pfn->mode + 2);
+		pfn_sb->version_minor = cpu_to_le16(3);
+		pfn_sb->min_version = cpu_to_le16(3);
+	} else {
+		pfn_sb->mode = cpu_to_le32(nd_pfn->mode);
+		pfn_sb->version_minor = cpu_to_le16(2);
+		pfn_sb->min_version = cpu_to_le16(2);
+	}
 	pfn_sb->align = cpu_to_le32(nd_pfn->align);
 	checksum = nd_sb_checksum((struct nd_gen_sb *) pfn_sb);
 	pfn_sb->checksum = cpu_to_le64(checksum);
