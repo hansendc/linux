@@ -1152,6 +1152,60 @@ out:
 	return rc;
 }
 
+/**
+ * migrate_demote_mapping() - Migrate this page and its mappings to its
+ * 			      demotion node.
+ * @page: An isolated, non-compound page that should move to
+ * 	  its current node's migration path.
+ *
+ * @returns: True if migrate demotion was successful, false otherwise
+ */
+bool migrate_demote_mapping(struct page *page)
+{
+	int rc, next_nid = next_migration_node(page_to_nid(page));
+	struct page *newpage;
+
+	/*
+	 * The flags are set to allocate only on the desired node in the
+	 * migration path, and to fail fast if not immediately available. We
+	 * are already in the memory reclaim path, we don't want heroic
+	 * efforts to get a page.
+	 */
+	gfp_t mask = GFP_NOWAIT	| __GFP_NOWARN | __GFP_NORETRY |
+		     __GFP_NOMEMALLOC | __GFP_THISNODE;
+
+	VM_BUG_ON_PAGE(PageCompound(page), page);
+	VM_BUG_ON_PAGE(PageLRU(page), page);
+
+	if (PageHuge(page))
+		return false;
+	if (next_nid < 0)
+		return false;
+
+	if (PageTransHuge(page)) {
+		newpage = alloc_pages_node(next_nid, mask | GFP_TRANSHUGE,
+					   HPAGE_PMD_ORDER);
+		if (newpage)
+			prep_transhuge_page(newpage);
+	} else
+		newpage = alloc_pages_node(next_nid, mask, 0);
+
+	if (!newpage)
+		return false;
+
+	/*
+	 * MIGRATE_ASYNC is the most light weight and never blocks.
+	 */
+	rc = __unmap_and_move_locked(page, newpage, MIGRATE_ASYNC);
+	if (rc != MIGRATEPAGE_SUCCESS) {
+		__free_pages(newpage, 0);
+		return false;
+	}
+
+	set_page_owner_migrate_reason(newpage, MR_DEMOTION);
+	return true;
+}
+
 /*
  * gcc 4.7 and 4.8 on arm get an ICEs when inlining unmap_and_move().  Work
  * around it.

@@ -1261,6 +1261,19 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 			; /* try to reclaim the page below */
 		}
 
+		if (migrate_demote_mapping(page)) {
+			unlock_page(page);
+			if (likely(put_page_testzero(page)))
+				goto free_it;
+
+			/*
+			 * Speculative reference will free this page,
+			 * so leave it off the LRU.
+			 */
+			nr_reclaimed++;
+			continue;
+		}
+
 		/*
 		 * Anonymous process memory has backing store?
 		 * Try to allocate it some swap space here.
