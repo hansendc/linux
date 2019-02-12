@@ -611,7 +611,8 @@ static unsigned long init_altmap_reserve(resource_size_t base)
 	return reserve;
 }
 
-static int __nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap)
+static int __nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap,
+		struct pfn_map_info *mi)
 {
 	struct resource *res = &pgmap->res;
 	struct vmem_altmap *altmap = &pgmap->altmap;
@@ -631,6 +632,19 @@ static int __nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap)
 	memcpy(res, &nsio->res, sizeof(*res));
 	res->start += start_pad;
 	res->end -= end_trunc;
+
+	*mi = (struct pfn_map_info) {
+		/*
+		 * TODO fix implementation to properly account for
+		 * 'start_pad' in map_base, and map_offset. As is, the
+		 * fact that __va(map_base) != __pa(map) leads
+		 * mistranslations in pmem_direct_access().
+		 */
+		.map_base = nsio->res.start,
+		.map_pad = start_pad,
+		.map_offset = offset,
+		.map_size = resource_size(res),
+	};
 
 	if (nd_pfn->mode == PFN_MODE_RAM) {
 		if (offset < reserve)
@@ -789,7 +803,8 @@ static int nd_pfn_init(struct nd_pfn *nd_pfn)
  * Determine the effective resource range and vmem_altmap from an nd_pfn
  * instance.
  */
-int nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap)
+int nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap,
+		struct pfn_map_info *mi)
 {
 	int rc;
 
@@ -801,6 +816,6 @@ int nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap)
 		return rc;
 
 	/* we need a valid pfn_sb before we can init a dev_pagemap */
-	return __nvdimm_setup_pfn(nd_pfn, pgmap);
+	return __nvdimm_setup_pfn(nd_pfn, pgmap, mi);
 }
 EXPORT_SYMBOL_GPL(nvdimm_setup_pfn);
