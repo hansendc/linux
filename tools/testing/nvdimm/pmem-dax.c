@@ -18,7 +18,8 @@
 long __pmem_direct_access(struct pmem_device *pmem, pgoff_t pgoff,
 		long nr_pages, void **kaddr, pfn_t *pfn)
 {
-	resource_size_t offset = PFN_PHYS(pgoff) + pmem->data_offset;
+	struct pfn_map_info *mi = &pmem->mi;
+	resource_size_t offset = PFN_PHYS(pgoff) + mi->map_offset;
 
 	if (unlikely(is_bad_pmem(&pmem->bb, PFN_PHYS(pgoff) / 512,
 					PFN_PHYS(nr_pages))))
@@ -28,12 +29,12 @@ long __pmem_direct_access(struct pmem_device *pmem, pgoff_t pgoff,
 	 * Limit dax to a single page at a time given vmalloc()-backed
 	 * in the nfit_test case.
 	 */
-	if (get_nfit_res(pmem->phys_addr + offset)) {
+	if (get_nfit_res(mi->map_base + offset)) {
 		struct page *page;
 
 		if (kaddr)
-			*kaddr = pmem->virt_addr + offset;
-		page = vmalloc_to_page(pmem->virt_addr + offset);
+			*kaddr = mi->map + offset;
+		page = vmalloc_to_page(mi->map + offset);
 		if (pfn)
 			*pfn = page_to_pfn_t(page);
 		pr_debug_ratelimited("%s: pmem: %p pgoff: %#lx pfn: %#lx\n",
@@ -43,9 +44,9 @@ long __pmem_direct_access(struct pmem_device *pmem, pgoff_t pgoff,
 	}
 
 	if (kaddr)
-		*kaddr = pmem->virt_addr + offset;
+		*kaddr = mi->map + offset;
 	if (pfn)
-		*pfn = phys_to_pfn_t(pmem->phys_addr + offset, pmem->pfn_flags);
+		*pfn = phys_to_pfn_t(mi->map_base + offset, mi->pfn_flags);
 
 	/*
 	 * If badblocks are present, limit known good range to the
@@ -53,5 +54,5 @@ long __pmem_direct_access(struct pmem_device *pmem, pgoff_t pgoff,
 	 */
 	if (unlikely(pmem->bb.count))
 		return nr_pages;
-	return PHYS_PFN(pmem->size - pmem->pfn_pad - offset);
+	return PHYS_PFN(mi->map_size - offset);
 }

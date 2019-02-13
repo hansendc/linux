@@ -64,6 +64,7 @@ static int dax_pmem_probe(struct device *dev)
 	struct nd_pfn_sb *pfn_sb;
 	struct dev_dax *dev_dax;
 	struct dax_pmem *dax_pmem;
+	struct pfn_map_info mi;
 	struct nd_namespace_io *nsio;
 	struct dax_region *dax_region;
 	struct nd_namespace_common *ndns;
@@ -83,7 +84,7 @@ static int dax_pmem_probe(struct device *dev)
 	rc = devm_nsio_enable(dev, nsio);
 	if (rc)
 		return rc;
-	rc = nvdimm_setup_pfn(nd_pfn, &dax_pmem->pgmap);
+	rc = nvdimm_setup_pfn(nd_pfn, &dax_pmem->pgmap, &mi);
 	if (rc)
 		return rc;
 	devm_nsio_disable(dev, nsio);
@@ -117,8 +118,10 @@ static int dax_pmem_probe(struct device *dev)
 		return PTR_ERR(addr);
 
 	/* adjust the dax_region resource to the start of data */
-	memcpy(&res, &dax_pmem->pgmap.res, sizeof(res));
-	res.start += le64_to_cpu(pfn_sb->dataoff);
+	res = (struct resource) {
+		.start = mi.map_base + mi.map_pad + mi.map_offset,
+		.end = mi.map_base + mi.map_pad + mi.map_size - 1,
+	};
 
 	rc = sscanf(dev_name(&ndns->dev), "namespace%d.%d", &region_id, &id);
 	if (rc != 2)

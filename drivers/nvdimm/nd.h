@@ -198,6 +198,8 @@ enum nd_pfn_mode {
 	PFN_MODE_NONE,
 	PFN_MODE_RAM,
 	PFN_MODE_PMEM,
+	PFN3_MODE_RAM,
+	PFN3_MODE_PMEM,
 };
 
 struct nd_pfn {
@@ -377,13 +379,22 @@ const char *nvdimm_namespace_disk_name(struct nd_namespace_common *ndns,
 unsigned int pmem_sector_size(struct nd_namespace_common *ndns);
 void nvdimm_badblocks_populate(struct nd_region *nd_region,
 		struct badblocks *bb, const struct resource *res);
+struct pfn_map_info {
+	resource_size_t map_base;
+	unsigned long map_offset;
+	resource_size_t map_size;
+	unsigned long map_pad;
+	u64 pfn_flags;
+	void *map;
+};
 #if IS_ENABLED(CONFIG_ND_CLAIM)
-int nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap);
+int nvdimm_setup_pfn(struct nd_pfn *nd_pfn, struct dev_pagemap *pgmap,
+		struct pfn_map_info *mi);
 int devm_nsio_enable(struct device *dev, struct nd_namespace_io *nsio);
 void devm_nsio_disable(struct device *dev, struct nd_namespace_io *nsio);
 #else
 static inline int nvdimm_setup_pfn(struct nd_pfn *nd_pfn,
-				   struct dev_pagemap *pgmap)
+		struct dev_pagemap *pgmap, struct pfn_map_info *mi)
 {
 	return -ENXIO;
 }
