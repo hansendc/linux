@@ -189,7 +189,7 @@ walk_system_ram_range(unsigned long start_pfn, unsigned long nr_pages,
 	struct memblock_region *reg;
 	unsigned long end_pfn = start_pfn + nr_pages;
 	unsigned long tstart, tend;
-	int ret = -1;
+	int ret = -EINVAL;
 
 	for_each_memblock(memory, reg) {
 		tstart = max(start_pfn, memblock_region_memory_base_pfn(reg));
