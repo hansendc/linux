@@ -928,7 +928,8 @@ static int fallback_migrate_page(struct address_space *mapping,
  *  MIGRATEPAGE_SUCCESS - success
  */
 static int move_to_new_page(struct page *newpage, struct page *page,
-				enum migrate_mode mode)
+				enum migrate_mode mode,
+				struct migrate_detail *m_detail)
 {
 	struct address_space *mapping;
 	int rc = -EAGAIN;
@@ -1002,7 +1003,8 @@ out:
 }
 
 static int __unmap_and_move_locked(struct page *page, struct page *newpage,
-				   enum migrate_mode mode)
+				   enum migrate_mode mode,
+				   struct migrate_detail *m_detail)
 {
 	int rc = -EAGAIN;
 	int page_was_mapped = 0;
@@ -1038,7 +1040,7 @@ static int __unmap_and_move_locked(struct page *page, struct page *newpage,
 		goto out;
 
 	if (unlikely(!is_lru)) {
-		rc = move_to_new_page(newpage, page, mode);
+		rc = move_to_new_page(newpage, page, mode, m_detail);
 		goto out_unlock;
 	}
 
@@ -1069,7 +1071,7 @@ static int __unmap_and_move_locked(struct page *page, struct page *newpage,
 		page_was_mapped = 1;
 	}
 	if (!page_mapped(page))
-		rc = move_to_new_page(newpage, page, mode);
+		rc = move_to_new_page(newpage, page, mode, m_detail);
 
 	if (page_was_mapped)
 		remove_migration_ptes(page,
@@ -1100,7 +1102,8 @@ out:
 }
 
 static int __unmap_and_move(struct page *page, struct page *newpage,
-				int force, enum migrate_mode mode)
+				int force, enum migrate_mode mode,
+				struct migrate_detail *m_detail)
 {
 	int rc = -EAGAIN;
 
@@ -1146,7 +1149,7 @@ static int __unmap_and_move(struct page *page, struct page *newpage,
 			goto out_unlock;
 		wait_on_page_writeback(page);
 	}
-	rc = __unmap_and_move_locked(page, newpage, mode);
+	rc = __unmap_and_move_locked(page, newpage, mode, m_detail);
 out_unlock:
 	unlock_page(page);
 out:
@@ -1255,7 +1258,7 @@ static ICE_noinline int unmap_and_move(new_page_t get_new_page,
 		goto out;
 	}
 
-	rc = __unmap_and_move(page, newpage, force, mode);
+	rc = __unmap_and_move(page, newpage, force, mode, m_detail);
 	if (rc == MIGRATEPAGE_SUCCESS)
 		set_page_owner_migrate_reason(newpage, m_detail->reason);
 
@@ -1401,7 +1404,7 @@ static int unmap_and_move_huge_page(new_page_t get_new_page,
 	}
 
 	if (!page_mapped(hpage))
-		rc = move_to_new_page(new_hpage, hpage, mode);
+		rc = move_to_new_page(new_hpage, hpage, mode, m_detail);
 
 	if (page_was_mapped)
 		remove_migration_ptes(hpage,
