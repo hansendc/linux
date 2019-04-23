@@ -110,6 +110,9 @@ enum vm_event_item { PGPGIN, PGPGOUT, PSWPIN, PSWPOUT,
 		SWAP_RA,
 		SWAP_RA_HIT,
 #endif
+#define HMEM_MIGRATE(__hmem_name)	__hmem_name_##SRC, __hmem_name_##DEST
+		HMEM_MIGRATE_UNKNOWN,
+		HMEM_MIGRATE_FIRST_ENTRY = HMEM_MIGRATE_UNKNOWN,
 		NR_VM_EVENT_ITEMS
 };
 
