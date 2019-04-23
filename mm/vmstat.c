@@ -27,6 +27,7 @@
 #include <linux/mm_inline.h>
 #include <linux/page_ext.h>
 #include <linux/page_owner.h>
+#include <linux/migrate.h>
 
 #include "internal.h"
 
@@ -526,6 +527,16 @@ void inc_zone_page_state(struct page *page, enum zone_stat_item item)
 	mod_zone_state(page_zone(page), item, 1, 1);
 }
 EXPORT_SYMBOL(inc_zone_page_state);
+
+void inc_hmem_state(enum migrate_hmem_reason hr, struct page *src, struct page *dst)
+{
+	int base_stat_nr = hr - MR_HMEM_UNKNOWN;
+	int zone_stat_src = HMEM_MIGRATE_FIRST_ENTRY + 2*base_stat_nr;
+	int zone_stat_dst = zone_stat_src + 1;
+	inc_zone_page_state(src, zone_stat_src);
+	inc_zone_page_state(dst, zone_stat_dst);
+}
+EXPORT_SYMBOL(inc_hmem_state);
 
 void dec_zone_page_state(struct page *page, enum zone_stat_item item)
 {
@@ -1164,6 +1175,9 @@ const char * const vmstat_text[] = {
 	"nr_dirtied",
 	"nr_written",
 	"nr_kernel_misc_reclaimable",
+	"hmem_unknown",
+	"hmem_reclaim_demote_src",
+	"hmem_reclaim_demote_dst",
 
 	/* enum writeback_stat_item counters */
 	"nr_dirty_threshold",

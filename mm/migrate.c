@@ -996,6 +996,7 @@ static int move_to_new_page(struct page *newpage, struct page *page,
 		 */
 		if (!PageMappingFlags(page))
 			page->mapping = NULL;
+		inc_hmem_state(m_detail->h_reason, page, newpage);
 	}
 out:
 	trace_mm_migrate_move_page(page, newpage, rc);
@@ -1166,6 +1167,7 @@ out:
  */
 bool migrate_demote_mapping(struct page *page)
 {
+	struct migrate_detail m_detail = {};
 	int rc, next_nid = next_migration_node(page_to_nid(page));
 	struct page *newpage;
 
@@ -1200,7 +1202,9 @@ bool migrate_demote_mapping(struct page *page)
 	/*
 	 * MIGRATE_ASYNC is the most light weight and never blocks.
 	 */
-	rc = __unmap_and_move_locked(page, newpage, MIGRATE_ASYNC);
+	m_detail.reason = MR_DEMOTION;
+	m_detail.h_reason = MR_HMEM_RECLAIM_DEMOTE;
+	rc = __unmap_and_move_locked(page, newpage, MIGRATE_ASYNC, &m_detail);
 	if (rc != MIGRATEPAGE_SUCCESS) {
 		__free_pages(newpage, 0);
 		return false;

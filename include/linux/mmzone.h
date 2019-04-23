@@ -183,6 +183,11 @@ enum node_stat_item {
 	NR_DIRTIED,		/* page dirtyings since bootup */
 	NR_WRITTEN,		/* page writings since bootup */
 	NR_KERNEL_MISC_RECLAIMABLE,	/* reclaimable non-slab kernel pages */
+#define HMEM_MIGRATE(__hmem_name)	__hmem_name_##SRC, __hmem_name_##DEST
+#define HMEM_MIGRATE_NAME(__hmem_name)	__hmem_name_##"_SRC", __hmem_name_##"_DEST"
+	HMEM_MIGRATE_UNKNOWN,
+	HMEM_MIGRATE_FIRST_ENTRY = HMEM_MIGRATE_UNKNOWN,
+	HMEM_MIGRATE(MR_HMEM_RECLAIM_DEMOTE),
 	NR_VM_NODE_STAT_ITEMS
 };
 
