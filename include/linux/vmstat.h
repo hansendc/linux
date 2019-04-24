@@ -263,6 +263,9 @@ extern void dec_zone_state(struct zone *, enum zone_stat_item);
 extern void __dec_zone_state(struct zone *, enum zone_stat_item);
 extern void __dec_node_state(struct pglist_data *, enum node_stat_item);
 
+enum migrate_hmem_reason;
+void inc_hmem_state(enum migrate_hmem_reason, struct page *, struct page *);
+
 void quiet_vmstat(void);
 void cpu_vm_stats_fold(int cpu);
 void refresh_zone_stat_thresholds(void);

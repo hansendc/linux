@@ -27,6 +27,7 @@
 #include <linux/mm_inline.h>
 #include <linux/page_ext.h>
 #include <linux/page_owner.h>
+#include <linux/migrate.h>
 
 #include "internal.h"
 
@@ -526,6 +527,36 @@ void inc_zone_page_state(struct page *page, enum zone_stat_item item)
 	mod_zone_state(page_zone(page), item, 1, 1);
 }
 EXPORT_SYMBOL(inc_zone_page_state);
+
+void inc_hmem_state(enum migrate_hmem_reason hr, struct page *src, struct page *dst)
+{
+	int base_stat_nr = hr - MR_HMEM_UNKNOWN;
+
+	/*
+	 * There are two zone stats for each 'migrate_hmem_reason',
+	 * a source and a destination.  Given the hmem_reason,
+	 * calculate the two corresponding zone stats:
+	 */
+	int zone_stat_src = HMEM_MIGRATE_FIRST_ENTRY + 2*base_stat_nr;
+	int zone_stat_dst = HMEM_MIGRATE_FIRST_ENTRY + 2*base_stat_nr + 1;
+
+	/*
+	 * HMEM_MIGRATE_FIRST_ENTRY is also the "unknown" which will
+	 * be tolerated for now since all code paths have not had
+	 * hmem migrations reasons added.
+	 *
+	 * An invalid value here probably comes from an uninitialized
+	 * stack instance of 'struct migrate_detail'.
+	 */
+	if (hr < MR_HMEM_UNKNOWN)
+		WARN_ON_ONCE(1);
+	if (hr >= MR_HMEM_NR_REASONS)
+		WARN_ON_ONCE(1);
+
+	inc_zone_page_state(src, zone_stat_src);
+	inc_zone_page_state(dst, zone_stat_dst);
+}
+EXPORT_SYMBOL(inc_hmem_state);
 
 void dec_zone_page_state(struct page *page, enum zone_stat_item item)
 {
@@ -1164,6 +1195,7 @@ const char * const vmstat_text[] = {
 	"nr_dirtied",
 	"nr_written",
 	"nr_kernel_misc_reclaimable",
+	"hmem_unknown",
 
 	/* enum writeback_stat_item counters */
 	"nr_dirty_threshold",
