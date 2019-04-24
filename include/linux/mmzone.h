@@ -186,6 +186,7 @@ enum node_stat_item {
 #define HMEM_MIGRATE(__hmem_name)	__hmem_name_##SRC, __hmem_name_##DEST
 	HMEM_MIGRATE_UNKNOWN,
 	HMEM_MIGRATE_FIRST_ENTRY = HMEM_MIGRATE_UNKNOWN,
+	HMEM_MIGRATE(MR_HMEM_RECLAIM_DEMOTE),
 	NR_VM_NODE_STAT_ITEMS
 };
 

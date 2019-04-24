@@ -1196,6 +1196,8 @@ const char * const vmstat_text[] = {
 	"nr_written",
 	"nr_kernel_misc_reclaimable",
 	"hmem_unknown",
+	"hmem_reclaim_demote_src",
+	"hmem_reclaim_demote_dst",
 
 	/* enum writeback_stat_item counters */
 	"nr_dirty_threshold",

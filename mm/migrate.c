@@ -1203,6 +1203,7 @@ bool migrate_demote_mapping(struct page *page)
 	 * MIGRATE_ASYNC is the most light weight and never blocks.
 	 */
 	m_detail.reason = MR_DEMOTION;
+	m_detail.h_reason = MR_HMEM_RECLAIM_DEMOTE;
 	rc = __unmap_and_move_locked(page, newpage, MIGRATE_ASYNC, &m_detail);
 	if (rc != MIGRATEPAGE_SUCCESS) {
 		__free_pages(newpage, 0);
