@@ -250,6 +250,52 @@ static void force_shm_swapin_readahead(struct vm_area_struct *vma,
 #endif		/* CONFIG_SWAP */
 
 /*
+ * Given a PTE, find the corresponding 'struct page'
+ * and acquire a reference.  Also handles non-present
+ * swap PTEs.
+ *
+ * Returns NULL when there is no page to reclaim.
+ */
+static struct page *pte_get_reclaim_page(struct vm_area_struct *vma,
+					 unsigned long addr, pte_t ptent)
+{
+	swp_entry_t entry;
+	struct page *page;
+
+	/* Totally empty PTE: */
+	if (pte_none(ptent))
+		return NULL;
+
+	/* Handle present or PROT_NONE ptes: */
+	if (!is_swap_pte(ptent)) {
+		page = vm_normal_page(vma, addr, ptent);
+		if (page)
+			get_page(page);
+		return page;
+	}
+
+	/*
+	 * 'ptent' is now definitely a (non-present) swap
+	 * PTE in this process.  Go look for additional
+	 * references to the swap cache.
+	 */
+
+	/*
+	 * Is it one of the "swap PTEs" that's not really
+	 * swap?  Do not try to reclaim those.
+	 */
+	entry = pte_to_swp_entry(ptent);
+	if (non_swap_entry(entry))
+		return NULL;
+
+	/*
+	 * The PTE was a true swap entry.  The page may be in
+	 * the swap cache.
+	 */
+	return lookup_swap_cache(entry, vma, addr);
+}
+
+/*
  * Schedule all required I/O operations.  Do not wait for completion.
  */
 static long madvise_willneed(struct vm_area_struct *vma,
@@ -398,13 +444,8 @@ regular_page:
 	for (; addr < end; pte++, addr += PAGE_SIZE) {
 		ptent = *pte;
 
-		if (pte_none(ptent))
-			continue;
-
-		if (!pte_present(ptent))
-			continue;
-
-		page = vm_normal_page(vma, addr, ptent);
+		/* 'page' can be mapped, in the swap cache or both */
+		page = pte_get_reclaim_page(vma, addr, ptent);
 		if (!page)
 			continue;
 
@@ -413,9 +454,10 @@ regular_page:
 		 * are sure it's worth. Split it if we are only owner.
 		 */
 		if (PageTransCompound(page)) {
-			if (page_mapcount(page) != 1)
+			if (page_mapcount(page) != 1) {
+				put_page(page);
 				break;
-			get_page(page);
+			}
 			if (!trylock_page(page)) {
 				put_page(page);
 				break;
@@ -436,12 +478,14 @@ regular_page:
 		}
 
 		/* Do not interfere with other mappings of this page */
-		if (page_mapcount(page) != 1)
+		if (page_mapcount(page) != 1) {
+			put_page(page);
 			continue;
+		}
 
 		VM_BUG_ON_PAGE(PageTransCompound(page), page);
 
-		if (pte_young(ptent)) {
+		if (!is_swap_pte(ptent) && pte_young(ptent)) {
 			ptent = ptep_get_and_clear_full(mm, addr, pte,
 							tlb->fullmm);
 			ptent = pte_mkold(ptent);
@@ -466,6 +510,8 @@ regular_page:
 			}
 		} else
 			deactivate_page(page);
+		/* drop ref acquired in pte_get_reclaim_page() */
+		put_page(page);
 	}
 
 	arch_leave_lazy_mmu_mode();
