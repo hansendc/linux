@@ -261,6 +261,7 @@ static struct page *pte_get_reclaim_page(struct vm_area_struct *vma,
 {
 	swp_entry_t entry;
 	struct page *page;
+	int nr_page_references = 0;
 
 	/* Totally empty PTE: */
 	if (pte_none(ptent))
@@ -271,7 +272,7 @@ static struct page *pte_get_reclaim_page(struct vm_area_struct *vma,
 		page = vm_normal_page(vma, addr, ptent);
 		if (page)
 			get_page(page);
-		return page;
+		goto got_page;
 	}
 
 	/*
@@ -292,7 +293,32 @@ static struct page *pte_get_reclaim_page(struct vm_area_struct *vma,
 	 * The PTE was a true swap entry.  The page may be in
 	 * the swap cache.
 	 */
-	return lookup_swap_cache(entry, vma, addr);
+	page = lookup_swap_cache(entry, vma, addr);
+	if (!page)
+		return NULL;
+got_page:
+	/*
+	 * Account for references to the swap entry.  These
+	 * might be "upgraded" to a normal mapping at any
+	 * time.
+	 */
+	if (PageSwapCache(page))
+		nr_page_references += page_swapcount(page);
+
+	/*
+	 * Account for all mappings of the page, including
+	 * when it is in the swap cache.  This ensures that
+	 * MADV_PAGOUT not interfere with anything shared
+	 * with another process.
+	 */
+	nr_page_references += page_mapcount(page);
+
+	if (nr_page_references > 1) {
+		put_page(page);
+		return NULL;
+	}
+
+	return page;
 }
 
 /*
@@ -474,12 +500,6 @@ regular_page:
 			pte = pte_offset_map_lock(mm, pmd, addr, &ptl);
 			pte--;
 			addr -= PAGE_SIZE;
-			continue;
-		}
-
-		/* Do not interfere with other mappings of this page */
-		if (page_mapcount(page) != 1) {
-			put_page(page);
 			continue;
 		}
 
