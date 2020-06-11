@@ -1159,6 +1159,29 @@ out:
 	return rc;
 }
 
+static int node_demotion[MAX_NUMNODES] = {[0 ...  MAX_NUMNODES - 1] = NUMA_NO_NODE};
+
+/**
+ * next_demotion_node() - Get the next node in the demotion path
+ * @node: The starting node to lookup the next node
+ *
+ * @returns: node id for next memory node in the demotion path hierarchy
+ * from @node; -1 if @node is terminal
+ */
+int next_demotion_node(int node)
+{
+	get_online_mems();
+	while (true) {
+		node = node_demotion[node];
+		if (node == NUMA_NO_NODE)
+			break;
+		if (node_online(node))
+			break;
+	}
+	put_online_mems();
+	return node;
+}
+
 /*
  * gcc 4.7 and 4.8 on arm get an ICEs when inlining unmap_and_move().  Work
  * around it.
