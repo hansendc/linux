@@ -2468,6 +2468,11 @@ int sysctl_compaction_handler(struct ctl_table *table, int write,
 	if (write)
 		compact_nodes();
 
+	{
+		extern void dump_node_demotion(void);
+		dump_node_demotion();
+	}
+
 	return 0;
 }
 
