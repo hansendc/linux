@@ -1141,7 +1141,13 @@ int next_demotion_node(int node)
 {
 	get_online_mems();
 	while (true) {
-		node = node_demotion[node];
+		/*
+		 * node_demotion[] is updated without excluding
+		 * this function from running.  READ_ONCE() avoids
+		 * theoretical problems like seeing half-updated
+		 * values.
+		 */
+		node = READ_ONCE(node_demotion[node]);
 		if (node == NUMA_NO_NODE)
 			break;
 		if (node_online(node))
@@ -3075,3 +3081,108 @@ void migrate_vma_finalize(struct migrate_vma *migrate)
 }
 EXPORT_SYMBOL(migrate_vma_finalize);
 #endif /* CONFIG_DEVICE_PRIVATE */
+
+/* Disable reclaim-based migration. */
+static void reset_all_migrate_targets(void)
+{
+	int node;
+
+	/* WRITE_ONCE() ensures readers never see partial updates: */
+	for_each_online_node(node)
+		WRITE_ONCE(node_demotion[node], NUMA_NO_NODE);
+}
+
+/*
+ * Find an automatic demotion target for 'node'.
+ * Failing here is OK.  It might just indicate
+ * being at the end of a chain.
+ */
+static int set_migrate_target(int node, nodemask_t *used)
+{
+	int migration_target;
+
+	/*
+	 * Can not set a migration target on a
+	 * node with it already set.
+	 */
+	if (READ_ONCE(node_demotion[node]) != NUMA_NO_NODE)
+		return NUMA_NO_NODE;
+
+	migration_target = find_next_best_node(node, used);
+	if (migration_target == NUMA_NO_NODE)
+		return NUMA_NO_NODE;
+
+	/* WRITE_ONCE() ensures readers never see partial updates: */
+	WRITE_ONCE(node_demotion[node], migration_target);
+
+	return migration_target;
+}
+
+/*
+ * When memory fills up on a node, memory contents can be
+ * automatically migrated to another node instead of
+ * discarded at reclaim.
+ *
+ * Establish a "migration path" which will start at nodes
+ * with CPUs and will follow the priorities used to build the
+ * page allocator zonelists.
+ *
+ * The difference here is that cycles must be avoided.  If
+ * node0 migrates to node1, then neither node1, nor anything
+ * node1 migrates to can migrate to node0.
+ */
+void set_migration_target_nodes(void)
+{
+	nodemask_t next_pass = NODE_MASK_NONE;
+	nodemask_t this_pass = NODE_MASK_NONE;
+	nodemask_t used_targets = NODE_MASK_NONE;
+	int node;
+
+	get_online_mems();
+	/*
+	 * Avoid any oddities like cycles that could occur
+	 * from changes in the topology.  This will leave
+	 * a momentary gap when migration is disabled.
+	 */
+	reset_all_migrate_targets();
+
+	/*
+	 * Ensure that the reset is visible across the system.
+	 * Readers will see either a combination of before+reset
+	 * state or reset+after.  The will never see before and
+	 * after state together.
+	 */
+	smp_wmb();
+
+	/*
+	 * Allocations go close to CPUs, first.  Assume that
+	 * the migration path starts at the nodes with CPUs.
+	 */
+	next_pass = node_states[N_CPU];
+again:
+	this_pass = next_pass;
+	next_pass = NODE_MASK_NONE;
+	/*
+	 * To avoid cycles in the migration "graph", ensure
+	 * that migration sources are not future targets by
+	 * setting them in 'used_targets'.
+	 *
+	 * But, do this only once per pass so that multiple
+	 * source nodes can share a target node.
+	 */
+	nodes_or(used_targets, used_targets, this_pass);
+	for_each_node_mask(node, this_pass) {
+		int target_node = set_migrate_target(node, &used_targets);
+
+		if (target_node == NUMA_NO_NODE)
+			continue;
+
+		/* Visit targets from this pass in the next pass: */
+		node_set(target_node, next_pass);
+	}
+	/* Is another pass necessary? */
+	if (!nodes_empty(next_pass))
+		goto again;
+
+	put_online_mems();
+}
