@@ -1187,6 +1187,7 @@ static struct page *alloc_demote_node_page(struct page *page, unsigned long node
 int migrate_demote_mapping(struct page *page)
 {
 	int next_nid = next_demotion_node(page_to_nid(page));
+	int ret;
 
 	VM_BUG_ON_PAGE(!PageLocked(page), page);
 	VM_BUG_ON_PAGE(PageHuge(page), page);
@@ -1198,8 +1199,18 @@ int migrate_demote_mapping(struct page *page)
 		return -ENOMEM;
 
 	/* MIGRATE_ASYNC is the most light weight and never blocks.*/
-	return __unmap_and_move(alloc_demote_node_page, NULL, next_nid,
+	ret = __unmap_and_move(alloc_demote_node_page, NULL, next_nid,
 				page, MIGRATE_ASYNC, MR_DEMOTION);
+
+	if (ret == MIGRATEPAGE_SUCCESS) {
+		int nr_demoted = hpage_nr_pages(page);
+		if (current_is_kswapd())
+			__count_vm_events(PGDEMOTE_KSWAPD, nr_demoted);
+		else
+			__count_vm_events(PGDEMOTE_DIRECT, nr_demoted);
+	}
+
+	return ret;
 }
 
 
