@@ -49,6 +49,7 @@
 #include <linux/sched/mm.h>
 #include <linux/ptrace.h>
 #include <linux/oom.h>
+#include <linux/memory.h>
 
 #include <asm/tlbflush.h>
 
@@ -3165,6 +3166,10 @@ void set_migration_target_nodes(void)
 	 * Avoid any oddities like cycles that could occur
 	 * from changes in the topology.  This will leave
 	 * a momentary gap when migration is disabled.
+	 *
+	 * This is superfluous for memory offlining since
+	 * MEM_GOING_OFFLINE does it independently, but it
+	 * does not hurt to do it a second time.
 	 */
 	disable_all_migrate_targets();
 
@@ -3211,6 +3216,60 @@ again:
 	/* Is another pass necessary? */
 	if (!nodes_empty(next_pass))
 		goto again;
-
-	put_online_mems();
 }
+
+/*
+ * React to hotplug events that might online or offline
+ * NUMA nodes.
+ *
+ * This leaves migrate-on-reclaim transiently disabled
+ * between the MEM_GOING_OFFLINE and MEM_OFFLINE events.
+ * This runs whether RECLAIM_MIGRATE is enabled or not.
+ * That ensures that the user can turn RECLAIM_MIGRATE
+ * without needing to recalcuate migration targets.
+ */
+#if defined(CONFIG_MEMORY_HOTPLUG)
+static int __meminit migrate_on_reclaim_callback(struct notifier_block *self,
+						 unsigned long action, void *arg)
+{
+	switch (action) {
+	case MEM_GOING_OFFLINE:
+		/*
+		 * Make sure there are not transient states where
+		 * an offline node is a migration target.  This
+		 * will leave migration disabled until the offline
+		 * completes and the MEM_OFFLINE case below runs.
+		 */
+		disable_all_migrate_targets();
+		break;
+	case MEM_OFFLINE:
+	case MEM_ONLINE:
+		/*
+		 * Recalculate the target nodes once the node
+		 * reaches its final state (online or offline).
+		 */
+		set_migration_target_nodes();
+		break;
+	case MEM_CANCEL_OFFLINE:
+		/*
+		 * MEM_GOING_OFFLINE disabled all the migration
+		 * targets.  Reenable them.
+		 */
+		set_migration_target_nodes();
+		break;
+	case MEM_GOING_ONLINE:
+	case MEM_CANCEL_ONLINE:
+		break;
+	}
+
+	return notifier_from_errno(0);
+}
+
+static int __init migrate_on_reclaim_init(void)
+{
+	hotplug_memory_notifier(migrate_on_reclaim_callback, 100);
+	return 0;
+}
+late_initcall(migrate_on_reclaim_init);
+#endif /* CONFIG_MEMORY_HOTPLUG */
+
