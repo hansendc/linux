@@ -1136,6 +1136,15 @@ out:
  */
 static int node_demotion[MAX_NUMNODES] = {[0 ...  MAX_NUMNODES - 1] = NUMA_NO_NODE};
 
+void dump_node_demotion(void)
+{
+	int node;
+
+	for_each_online_node(node)
+		printk("%2d -> %2d\n", node, node_demotion[node]);
+}
+
+
 /**
  * next_demotion_node() - Get the next node in the demotion path
  * @node: The starting node to lookup the next node
