@@ -1610,7 +1610,7 @@ check_again:
 				put_page(pages[i]);
 
 		if (migrate_pages(&cma_page_list, alloc_migration_target, NULL,
-			(unsigned long)&mtc, MIGRATE_SYNC, MR_CONTIG_RANGE)) {
+			(unsigned long)&mtc, MIGRATE_SYNC, MR_CONTIG_RANGE, NULL)) {
 			/*
 			 * some of the pages failed migration. Do get_user_pages
 			 * without migration.
