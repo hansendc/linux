@@ -14,8 +14,6 @@
 #include <linux/types.h>
 /* include compiler specific intrinsics */
 #include <asm/ia64regs.h>
-#ifdef __INTEL_COMPILER
-# include <asm/intel_intrin.h>
 #else
 # include <asm/gcc_intrin.h>
 #endif
