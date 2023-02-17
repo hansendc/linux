@@ -671,12 +671,11 @@ static struct ucode_patch *find_patch(unsigned int cpu)
 
 static int collect_cpu_info_amd(int cpu, struct cpu_signature *csig)
 {
-	struct cpuinfo_x86 *c = &cpu_data(cpu);
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
 	struct ucode_patch *p;
 
 	csig->sig = cpuid_eax(0x00000001);
-	csig->rev = c->microcode;
+	csig->rev = amd_get_microcode_revision();
 
 	/*
 	 * a patch could have been loaded early, set uci->mc so that
