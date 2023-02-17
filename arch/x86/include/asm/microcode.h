@@ -33,6 +33,8 @@ enum ucode_state {
 };
 
 struct microcode_ops {
+	bool safe_late_load;
+
 	enum ucode_state (*request_microcode_fw) (int cpu, struct device *);
 
 	void (*microcode_fini_cpu) (int cpu);
