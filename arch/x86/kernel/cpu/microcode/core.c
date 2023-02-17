@@ -389,6 +389,11 @@ static inline void update_microcode_version_cache(int cpu,
 		boot_cpu_data.microcode = uci->cpu_sig.rev;
 }
 
+static inline enum ucode_state apply_microcode(int cpu)
+{
+	return microcode_ops->apply_microcode(cpu);
+}
+
 /*
  * Returns:
  * < 0 - on error
@@ -420,7 +425,7 @@ static int __reload_late(void *info)
 	 */
 	if (cpumask_first(topology_sibling_cpumask(cpu)) == cpu) {
 		lead_thread = true;
-		err = microcode_ops->apply_microcode(cpu);
+		err = apply_microcode(cpu);
 	} else {
 		lead_thread = false;
 		goto wait_for_siblings;
@@ -444,7 +449,7 @@ wait_for_siblings:
 	 * revision.
 	 */
 	if (!lead_thread)
-		err = microcode_ops->apply_microcode(cpu);
+		err = apply_microcode(cpu);
 
 	/* Update the "cache" in the cpuinfo_x86 structs: */
 	update_microcode_version_cache(cpu, uci);
@@ -579,7 +584,7 @@ static enum ucode_state microcode_init_cpu(int cpu)
 	memset(uci, 0, sizeof(*uci));
 
 	microcode_ops->collect_cpu_info(cpu, &uci->cpu_sig);
-	ret = microcode_ops->apply_microcode(cpu);
+	ret = apply_microcode(cpu);
 
 	update_microcode_version_cache(cpu, uci);
 
@@ -595,7 +600,7 @@ void microcode_bsp_resume(void)
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
 
 	if (uci->mc) {
-		microcode_ops->apply_microcode(cpu);
+		apply_microcode(cpu);
 		update_microcode_version_cache(cpu, uci);
 	} else
 		reload_early_microcode(cpu);
@@ -610,7 +615,7 @@ static int mc_cpu_starting(unsigned int cpu)
 	struct ucode_cpu_info *uci = ucode_cpu_info + cpu;
 	enum ucode_state err;
 
-	err = microcode_ops->apply_microcode(cpu);
+	err = apply_microcode(cpu);
 
 	pr_debug("%s: CPU%d, err: %d\n", __func__, cpu, err);
 
