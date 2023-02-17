@@ -140,6 +140,14 @@ static int is_lateload_safe(struct microcode_header_intel *mc_header)
 	struct ucode_cpu_info uci;
 
 	/*
+	 * If minrev is bypassed via debugfs, then allow late-load.
+	 */
+	if (override_minrev) {
+		pr_info("Bypassing minrev enforcement via debugfs\n");
+		return 0;
+	}
+
+	/*
 	 * When late-loading, ensure the header declares a minimum revision
 	 * required to perform a late-load.
 	 */
