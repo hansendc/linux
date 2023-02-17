@@ -376,10 +376,8 @@ static int apply_microcode_early(struct ucode_cpu_info *uci, bool early)
 	 * already.
 	 */
 	rev = intel_get_microcode_revision();
-	if (rev >= mc->hdr.rev) {
-		uci->cpu_sig.rev = rev;
+	if (rev >= mc->hdr.rev)
 		return UCODE_OK;
-	}
 
 	old_rev = rev;
 
@@ -395,8 +393,6 @@ static int apply_microcode_early(struct ucode_cpu_info *uci, bool early)
 	rev = intel_get_microcode_revision();
 	if (rev != mc->hdr.rev)
 		return -1;
-
-	uci->cpu_sig.rev = rev;
 
 	if (early)
 		print_ucode(old_rev, uci->cpu_sig.rev, mc->hdr.date);
@@ -475,6 +471,7 @@ void __init load_ucode_intel_bsp(void)
 	uci.mc = patch;
 
 	apply_microcode_early(&uci, true);
+	intel_cpu_collect_info(&uci);
 }
 
 void load_ucode_intel_ap(void)
@@ -498,6 +495,7 @@ void load_ucode_intel_ap(void)
 	uci.mc = *iup;
 
 	apply_microcode_early(&uci, true);
+	intel_cpu_collect_info(&uci);
 }
 
 static struct microcode_intel *find_patch(struct ucode_cpu_info *uci)
@@ -536,6 +534,7 @@ void reload_ucode_intel(void)
 	uci.mc = p;
 
 	apply_microcode_early(&uci, false);
+	intel_cpu_collect_info(&uci);
 }
 
 static int collect_cpu_info(int cpu_num, struct cpu_signature *csig)
