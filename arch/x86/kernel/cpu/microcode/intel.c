@@ -621,11 +621,6 @@ static enum ucode_state apply_microcode_intel(int cpu)
 
 out:
 	uci->cpu_sig.rev = rev;
-	c->microcode	 = rev;
-
-	/* Update boot_cpu_data's revision too, if we're on the BSP: */
-	if (bsp)
-		boot_cpu_data.microcode = rev;
 
 	return ret;
 }
