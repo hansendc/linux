@@ -553,7 +553,7 @@ static int collect_cpu_info(int cpu_num, struct cpu_signature *csig)
 		csig->pf = 1 << ((val[1] >> 18) & 7);
 	}
 
-	csig->rev = c->microcode;
+	csig->rev = intel_get_microcode_revision();
 
 	return 0;
 }
@@ -712,6 +712,14 @@ static enum ucode_state generic_load_microcode(int cpu, struct iov_iter *iter)
 static bool is_blacklisted(unsigned int cpu)
 {
 	struct cpuinfo_x86 *c = &cpu_data(cpu);
+	u32 microcode_rev;
+
+	/*
+	 * c->microcode is unsafe to use while microcode is being
+	 * applied, but this is before the firmware is even loaded.
+	 * It is safe to use here.
+	 */
+	microcode_rev = c->microcode;
 
 	/*
 	 * Late loading on model 79 with microcode revision less than 0x0b000021
@@ -723,8 +731,8 @@ static bool is_blacklisted(unsigned int cpu)
 	    c->x86_model == INTEL_FAM6_BROADWELL_X &&
 	    c->x86_stepping == 0x01 &&
 	    llc_size_per_core > 2621440 &&
-	    c->microcode < 0x0b000021) {
-		pr_err_once("Erratum BDF90: late loading with revision < 0x0b000021 (0x%x) disabled.\n", c->microcode);
+	    microcode_rev < 0x0b000021) {
+		pr_err_once("Erratum BDF90: late loading with revision < 0x0b000021 (0x%x) disabled.\n", microcode_rev);
 		pr_err_once("Please consider either early loading through initrd/built-in or a potential BIOS update.\n");
 		return true;
 	}
