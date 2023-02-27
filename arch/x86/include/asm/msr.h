@@ -310,6 +310,17 @@ void msrs_free(struct msr *msrs);
 int msr_set_bit(u32 msr, u8 bit);
 int msr_clear_bit(u32 msr, u8 bit);
 
+/* Helper that can never get accidentally un-inlined. */
+#define set_clr_bits_msrl(msr, set, clear)	do {	\
+	u64 __val, __new_val, __msr = msr;		\
+							\
+	rdmsrl(__msr, __val);				\
+	__new_val = (__val & ~(clear)) | (set);		\
+							\
+	if (__new_val != __val)				\
+		wrmsrl(__msr, __new_val);		\
+} while (0)
+
 #ifdef CONFIG_SMP
 int rdmsr_on_cpu(unsigned int cpu, u32 msr_no, u32 *l, u32 *h);
 int wrmsr_on_cpu(unsigned int cpu, u32 msr_no, u32 l, u32 h);
